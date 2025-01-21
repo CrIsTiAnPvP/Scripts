@@ -1,0 +1,284 @@
+#!/bin/bash
+
+clear
+
+#Creación del directorio usado para guardar errores
+log_dir="$(pwd)/.duplicity-restore"
+mkdir $log_dir > /dev/null 2> /dev/null
+##################################################
+
+#Colores para dar formato más adelante
+amarillo="\e[33m"
+negrita="\e[1m"
+azul="\e[36m"
+verde="\e[92m"
+reset="\e[0m"
+######################################
+
+#Comprobación de parámetros
+if [ $# -eq 0 ]; then
+	echo "Error, como mínimo debes pasar un parámetro"
+	exit 1
+fi
+
+if [ -z $1 ]; then
+	echo "Error, el parámetro 1 no puede ser vacio (gdrive - file)"
+	exit 1
+fi
+
+OPCION=""
+
+case $1 in
+	"gdrive")OPCION="gdrive";;
+	"file")OPCION="file";;
+	*)
+		echo "No se encuentra ese método, intentalo de nuevo"
+		exit 1
+		;;
+esac
+#########################
+
+if [[ $OPCION -eq "gdrive" ]]; then
+	if [ -e "$log_dir/settings.dev" ]; then
+		while IFS= read -r linea; do
+			if [[ "$linea" != "#"* ]]; then
+				palabra=($linea)
+				if [[ "$linea" == "url:"* ]]; then
+					 cuenta=${palabra[-1]}
+				elif [[ "$linea" == "ID:"* ]]; then
+					ID=${palabra[-1]}
+				elif [[ "$linea" == "config_dir:"* ]]; then
+					config=${palabra[-1]}
+				fi
+			fi
+			done < "$log_dir/settings.dev"
+		
+		echo -e "Se ha detectado una configuración antigua:
+URL:${azul}$cuenta${reset}
+ID: ${azul}$ID${reset}
+RutaConfig: ${azul}$config${reset}"
+		echo ""
+		read -rp "¿Quieres usar esta configuración? (s/N): " old
+	fi
+	
+	if [[ "${old,,}" == "s" ]]; then
+		echo "" > /dev/null		
+	else
+		clear
+		read -rp "Proporcioname la URL de la cuenta de servicio: " cuenta
+	
+		while [[ $cuenta != *iam.gserviceaccount.com ]]; do
+			echo ""
+			read -rp "Proporcioname una cuenta de servicio correcta: " cuenta
+		done
+	
+		echo ""
+
+		read -rp "Proporcioname la ruta donde está guardada la configuración json: " config
+		
+		while [[ $config != /* || $config != *.json ]]; do 
+			echo ""
+			read -rp "Error pasame la ruta completa hasta el archivo, incluyendo el mismo: " config
+		done
+		
+		echo ""
+
+		read -rp "Proporcioname la ID de la carpeta de Drive donde se encuentran los backups: " ID
+	
+		while [ -z $ID ]; do
+			echo""
+			read -rp "Error, necesito la ID de la carpeta de Drive: " ID
+		done
+		
+		read -rp "Quieres guardar esta configuración para un futuro uso? (S/n): " guardar
+
+		if [[ "$guardar" == "" || "${guardar,,}" == "s"  ]]; then
+			echo "url: $cuenta
+ID: $ID
+config_dir: $config" > $log_dir/settings.dev
+
+		fi
+		
+		clear
+	fi
+
+	#Borrar ficheros temporales al salir
+	borrar_tmp() {
+		rm -f /tmp/d-list > /dev/null 2> /dev/null
+		rm -f /tmp/d-status > /dev/null 2> /dev/null
+		rm -f /tmp/d-curren* >/dev/null 2> /dev/null
+	}
+
+	trap borrar_tmp EXIT
+	####################################
+
+	export GOOGLE_SERVICE_JSON_FILE=$config
+
+	duplicity collection-status gdrive://${cuenta}?myDriveFolderID=$ID > /tmp/d-status
+
+	num_copias=$(tail +14 /tmp/d-status | grep ": [0-999]" -o | grep "[0-999]" -o)
+
+	divi=0
+	if [ $num_copias % 2 == 0 ]; then
+		divi=$(($num_copias /2))
+	else 
+		divi=$(($num_copias -2))
+	fi	
+
+	tail +$((14 + $num_copias -$divi)) /tmp/d-status | head -$num_copias > /tmp/d-list
+	
+	clear
+
+	while IFS= read -r linea; do
+		palabra=($linea)
+		echo -e "${amarillo}${negrita}------------------------------------${reset}"
+		echo -e "Tipo de copia: ${azul}${palabra[0]}${reset}"
+		echo -e "Dia de la semana: ${azul}${palabra[1]}${reset}"
+		echo -e "Mes de la copia: ${azul}${palabra[2]}${reset}"
+		echo -e "Dia del mes: ${azul}${palabra[3]}${reset}"
+		echo -e "Hora: ${azul}${palabra[4]}${reset}"
+		echo -e "Año: ${azul}${palabra[5]}${reset}"		
+		echo -e "${amarillo}${negrita}------------------------------------${reset}"
+	done < /tmp/d-list
+
+	echo -e "${reset}"
+
+	read -rp "Introduce la copia a restaurar (1 - $num_copias): " copia
+
+	while [[ $copia < 1 || $copia > $num_copias ]]; do
+		echo ""
+		read -rp "Error, esa copia no existe elige una de arriba (1 - $num_copias): " copia
+	done
+	
+	copia_a=$(sed -n "${copia}p" /tmp/d-list)
+	mes=""
+	dia=""
+	param=($copia_a)
+	case ${param[2]} in 
+		"Jan")mes=01;;
+		"Feb")mes=02;;
+		"Mar")mes=03;;
+		"Apr")mes=04;;
+		"May")mes=05;;
+		"Jun")mes=06;;
+		"Jul")mes=07;;
+		"Aug")mes=08;;
+		"Sep")mes=09;;
+		"Oct")mes=10;;
+		"Nov")mes=11;;
+		"Dec")mes=12;;
+	esac
+
+	if [[ ${param[3]} -lt 10 ]]; then
+		dia="0${param[3]}"
+	fi
+
+	echo ""
+	read -rsp "Dime la contraseña usada en la copia: " pass
+	echo ""
+
+	while [ -z $pass ]; do
+		echo ""
+		read -rsp "Error la contraseña no puede ser menor de 1 caracter: " pass
+	done
+	
+	echo ""
+	read -rp "¿Quieres ver los archivos que se van a restaurar? (S/n): " listar
+
+	clear
+
+	if [[ "$listar" == "" || "${listar,,}" == "s" ]]; then
+		duplicity list-current-files --time "${param[5]}-$mes-${dia}T${param[4]}" gdrive://${cuenta}?myDriveFolderID=$ID > /tmp/d-current 2> $log_dir/error.log
+		cantidad=$(wc -l < /tmp/d-current)
+		cantidad=$(($cantidad -3))	
+		contador=1
+		tail -n +4 /tmp/d-current > /tmp/d-currentb	
+		echo -e "Cantidad de archivos en la copia: ${azul}${negrita}$cantidad${reset}\n"
+		read -rp "¿Quieres ver la fecha de ultima modificación? (s/N): " modif
+		if [[ "${modif,,}" == "s" ]]; then
+			echo ""
+			
+			while IFS= read -r linea; do
+				archivo=($linea)
+				fecha="${archivo[2]}/${archivo[1]}/${archivo[4]} - ${archivo[3]}"
+				if [ $contador -eq $cantidad ]; then
+					echo -e "${amarillo}${negrita}${archivo[-1]}${reset} ${verde}--> ${azul}${negrita}${fecha}"
+				else
+					echo -e "${amarillo}${negrita}${archivo[-1]}${reset} ${verde}--> ${azul}${negrita}${fecha}"
+					echo "-------------------------------------------"
+				fi
+				contador=$(($contador +1))
+			done < /tmp/d-currentb
+		else
+			echo ""
+			while IFS= read -r linea; do
+                		archivo=($linea)
+				if [ $contador -eq $cantidad ]; then
+					echo -en "${amarillo}${negrita}${archivo[-1]}"
+				else
+					echo -en "${amarillo}${negrita}${archivo[-1]} ${azul}- "
+				fi
+				contador=$(($contador +1))
+			done < /tmp/d-currentb
+
+			echo -e "${reset}"
+		fi
+		echo -en "${reset}"
+	fi
+	export PASSPHRASE=$pass
+
+	echo ""
+	read -rp "Dime donde quieres restaurar la copia: " ruta
+
+	while [[ $ruta != /* ]]; do
+		echo ""
+		read -rp "Error, debes espicificarme la ruta: " ruta
+	done
+
+	while [ -d $ruta ]; do
+		echo ""
+		read -rp "Error, esa carpeta ya existe, proporcioname una carpeta que no exista:  " ruta
+	done
+
+	duplicity restore --time "${param[5]}-$mes-${dia}T${param[4]}" gdrive://${cuenta}?myDriveFolderID=$ID $ruta > $log_dir/restore.log  2> $log_dir/error.log
+	
+	lineas_error=$(wc -l < "$log_dir/error.log")
+	linea_error_gpg=$(sed -n "$(( $lineas_error -2))p" $log_dir/error.log )
+
+	if [[  $linea_error_gpg == *"No secret key"* ]]; then
+		echo ""
+		echo "Error, esta copia de seguridad está cifrada con un certificado"
+		echo ""
+		read -rp "Dime la key del certificado: " key
+
+		while (( ${#key} % 8 != 0 )) || [[ ${#key} -lt 1 ]]; do
+			echo ""
+			read -rp  "Error la longitud de la key debe ser (8, 16 o 32): " key
+		done
+
+		echo ""
+		read -rp "Dime la ruta del pubring de gpg (.gnupg): " ruta_pubring
+
+		while [[ $ruta_pubring != /* || $ruta_pubring != *.gnupg* ]]; do
+			echo ""
+			read -rp "Error, debes pasarme la ruta entera hasta el pubring [/a/b/.gnupg]: " ruta_pubring
+		done
+
+		export GNUPGHOME=$ruta_pubring
+		GNUPG_KEY=$key
+
+		duplicity restore --encrypt-sign-key="$GNUPG_KEY" --time "${param[5]}-$mes-${dia}T${param[4]}" gdrive://${cuenta}?myDriveFolderID=$ID $ruta > $log_dir/restore.log  2> $log_dir/error.log
+
+		unset GNUPGHOME
+	fi
+	
+	chmod 777 $ruta > /dev/null 2> /dev/null
+
+	unset PASSPHRASE
+	unset GOOGLE_SERVICE_JSON_FILE
+
+	cantidad_de_archivos=$(ls -lA $ruta | grep '^-' | wc -l)
+
+	echo ""
+	echo "Se han restaurado $cantidad_de_archivos archivos correctamente."
+fi

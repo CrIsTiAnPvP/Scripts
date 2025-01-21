@@ -1,0 +1,14 @@
+#!/bin/bash
+export GOOGLE_SERVICE_ACCOUNT_URL=cuenta@duplicity-413012.iam.gserviceaccount.com
+export GOOGLE_SERVICE_JSON_FILE="/home/cristian/duplicity_creds.json"
+export GNUPGHOME='/home/cristian/.gnupg'
+export PASSPHRASE="12345"
+
+GPG_KEY="095C14A9D545ACCD"
+
+duplicity full --encrypt-sign-key="$GPG_KEY" /archivos gdrive://${GOOGLE_SERVICE_ACCOUNT_URL}?myDriveFolderID=1Angqhqo9osBDxUhDh_E75ubIGHDd1gPx >> /var/log/duplicity/gdrive_log_full.txt 2>> /var/log/duplicity/error_gdrive_log_full.txt
+
+unset GOOGLE_SERVICE_ACCOUNT_URL
+unset GOOGLE_SERVICE_JSON_FILE
+unset GNUPGHOME
+unset PASSPHRASE
