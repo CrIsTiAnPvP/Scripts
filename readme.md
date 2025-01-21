@@ -17,5 +17,5 @@
 
 ## Links
 
-Herramienta utilizada: [Duplicity](https://duplicity.gitlab.io/)
+Herramienta utilizada: [Duplicity](https://duplicity.gitlab.io/)\
 Sigueme para más scripts/aplicaciones: [YouTube](https://youtube.com/CristianPvP)
